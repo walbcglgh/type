@@ -149,12 +149,12 @@
       </div>
 
       <div class="typer" id="typer">
-        <div class="text-view" id="view"></div>
-        <input id="cap" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" tabindex="-1">
+        <div class="lines" id="lines"></div>
         <div class="ghost" id="ghost">準備好了，直接開始打字</div>
       </div>
       <div class="bar"><i id="bar"></i></div>
-      <p class="tip">打錯可用 <kbd>⌫</kbd> 修正；想中止按 <kbd>Esc</kbd></p>
+      <p class="line-hint" id="hint" hidden></p>
+      <p class="tip">用你慣用的輸入法把這一行的字打出來，打滿會自動換下一行；想中止按 <kbd>Esc</kbd></p>
     </div>
 
     <!-- 學習模式 -->

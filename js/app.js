@@ -29,11 +29,9 @@
     running: false,
     started: false,
     finished: false,
-    blocked: false,
-    composing: false,
-    target: "",
-    cells: [],
-    idx: 0,
+    rows: [],
+    li: 0,
+    filled: 0,
     hits: 0,
     errors: 0,
     startTime: 0,
@@ -94,32 +92,89 @@
 
   function speedOf() {
     var mins = Math.max(S.elapsed / 60, 1 / 60);
-    return isHan() ? S.hits / mins : S.hits / 5 / mins;
+    var n = S.filled || 0;
+    return isHan() ? n / mins : n / 5 / mins;
   }
   function speedLabel() { return isHan() ? "字/分" : "WPM"; }
+
+  /* ---------------- 文本：一律切成「行」 ----------------
+   * 斷行優先序：句末標點（。！？；）> 讀點（，、：）> 空格 > 硬切。
+   * 目標是像課本那樣「一行一聯」，例如「鵝鵝，曲項向天歌，」一格、「白毛浮綠水，紅掌撥清波。」一格。
+   */
+  var SOFT = 16, HARD = 22;
+  function cut(text, max) {
+    var out = [], buf = "";
+    for (var i = 0; i < text.length; i++) {
+      buf += text[i];
+      if (buf.length >= max && /[，、：,;:]$/.test(buf)) { out.push(buf); buf = ""; }
+    }
+    if (buf) {
+      if (out.length && (out[out.length - 1] + buf).length <= max + 4) out[out.length - 1] += buf;
+      else out.push(buf);
+    }
+    // 仍超長（多半是沒標點的英文）→ 在空格處斷，不把單字切兩半
+    var res = [];
+    out.forEach(function (seg) {
+      while (seg.length > max + 4) {
+        var sp = seg.lastIndexOf(" ", max);
+        if (sp < 8) sp = max;
+        res.push(seg.slice(0, sp === max ? max : sp));
+        seg = seg.slice(sp === max ? max : sp + 1);
+      }
+      if (seg) res.push(seg);
+    });
+    return res;
+  }
+  function splitLong(line) {
+    if (line.length <= SOFT) return [line];
+    // 先依句末標點切
+    var parts = [], buf = "";
+    for (var i = 0; i < line.length; i++) {
+      buf += line[i];
+      if (/[。！？；]$/.test(buf)) { parts.push(buf); buf = ""; }
+    }
+    if (buf) parts.push(buf);
+    var out = [];
+    parts.forEach(function (p) {
+      if (p.length <= SOFT) { out.push(p); return; }
+      cut(p, SOFT).forEach(function (x) {
+        if (x.length <= HARD) out.push(x);
+        else cut(x, HARD).forEach(function (y) { out.push(y); });
+      });
+    });
+    return out;
+  }
+  function toLines(text) {
+    var out = [];
+    text.split("\n").forEach(function (l) {
+      l = l.trim();
+      if (l) splitLong(l).forEach(function (x) { out.push(x); });
+    });
+    return out;
+  }
 
   function pickPoem() {
     var list = POEMS[S.tier] || POEMS.e;
     var x = list[Math.floor(Math.random() * list.length)];
     if (list.length > 1 && x === S.lastPoem) x = list[(list.indexOf(x) + 1) % list.length];
     S.lastPoem = x;
-    S.credit = (x.a ? x.a + "〈" + x.t + "〉" : x.t) + "　";
-    return x.p.join("");
+    S.credit = x.a ? x.a + "〈" + x.t + "〉" : x.t;
+    return x.p.slice();
   }
 
-  function pickSentence() {
+  function pickLines() {
     if (S.src === "poem") return pickPoem();
     var pool = S.src === "en" ? D.SENTENCES : D.ZH_SENTENCES;
     var s = pool[Math.floor(Math.random() * pool.length)];
     if (pool.length > 1 && s === S.lastSentence) s = pool[(pool.indexOf(s) + 1) % pool.length];
     S.lastSentence = s;
     S.credit = "";
-    return s;
+    return [s];
   }
 
-  function nextText() {
-    if (S.customText && !S.usedCustom) { S.usedCustom = true; S.credit = ""; return S.customText; }
-    return pickSentence();
+  function nextLines() {
+    if (S.customText && !S.usedCustom) { S.usedCustom = true; S.credit = ""; return toLines(S.customText); }
+    return pickLines();
   }
 
   /* ---------------- 摘要文字 ---------------- */
@@ -184,111 +239,158 @@
     }, ms);
   }
 
-  /* ---------------- 文本渲染 ---------------- */
+  /* ---------------- 逐行練習引擎 ----------------
+   * 每一行：上面是範例（逐字上色當即時回饋），下面是原生 input。
+   * 用原生 input 是因為注音一定要靠它才能選字、按 Enter 出字。
+   */
   function resetView() {
-    el.view.innerHTML = "";
-    S.cells = []; S.target = ""; S.idx = 0; S.credit = "";
-    if (el.comp && el.comp.parentNode) el.comp.parentNode.removeChild(el.comp);
+    el.lines.innerHTML = "";
+    S.rows = [];
+    S.li = 0;
+    S.credit = "";
   }
 
-  function appendText(str) {
+  function addBlock(lines) {
     if (S.credit) {
-      var tag = document.createElement("i");
-      tag.className = "pc";
-      tag.textContent = S.credit;
-      el.view.appendChild(tag);
+      var cap = document.createElement("div");
+      cap.className = "credit";
+      cap.textContent = S.credit;
+      el.lines.appendChild(cap);
     }
-    S.target += str;
-    for (var i = 0; i < str.length; i++) {
-      var ch = str[i];
-      var sp = document.createElement("span");
-      sp.textContent = ch === " " ? "␣" : ch;
-      sp.dataset.ch = ch;
-      el.view.appendChild(sp);
-      S.cells.push({ ch: ch, node: sp, state: "" });
-    }
-    paintCursor();
-  }
+    lines.forEach(function (text) {
+      var row = document.createElement("div");
+      row.className = "line";
 
-  function paintCursor() {
-    for (var i = 0; i < S.cells.length; i++) {
-      S.cells[i].node.classList.toggle("cur", i === S.idx);
-    }
-    var c = S.cells[S.idx];
-    if (!c) return;
-    var want = c.node.offsetTop - el.view.clientHeight * 0.35;
-    if (Math.abs(el.view.scrollTop - want) > 2) el.view.scrollTop = Math.max(0, want);
-    // 讓隱藏 input 跟著游標走，輸入法的選字窗才會出現在你正在打的地方
-    if (S.mode === "normal") {
-      var r = c.node.getBoundingClientRect(), pr = el.typer.getBoundingClientRect();
-      el.cap.style.left = Math.max(0, r.left - pr.left) + "px";
-      el.cap.style.top = Math.max(0, r.top - pr.top) + "px";
-    }
-  }
-
-  function paintCell(i, state) {
-    var c = S.cells[i];
-    if (!c) return;
-    c.state = state;
-    c.node.classList.toggle("ok", state === "ok");
-    c.node.classList.toggle("bad", state === "bad");
-  }
-
-  /* ---------------- 輸入法組字緩衝顯示 ---------------- */
-  // 把「還在拼的注音」顯示在游標處，否則使用者根本不知道自己按了什麼、拼到哪裡
-  function showComposing(str) {
-    var node = el.comp;
-    if (!node) return;
-    if (!str) { if (node.parentNode) node.parentNode.removeChild(node); return; }
-    var cur = S.cells[S.idx] && S.cells[S.idx].node;
-    if (cur) el.view.insertBefore(node, cur);
-    else el.view.appendChild(node);
-    if (node.textContent !== str) node.textContent = str;
-  }
-  /* ---------------- 輸入處理 ---------------- */
-  function commit(str) {
-    if (!S.running || S.blocked || S.finished) return;
-    for (var i = 0; i < str.length; i++) {
-      if (S.idx >= S.target.length) {
-        if (activeTiming() === "time") {
-          var more = pickSentence();
-          appendText(isHan() ? more : " " + more);
-        } else { finish(); return; }
+      var sample = document.createElement("div");
+      sample.className = "sample";
+      for (var i = 0; i < text.length; i++) {
+        var sp = document.createElement("span");
+        sp.textContent = text[i];
+        sample.appendChild(sp);
       }
-      var got = str[i], want = S.target[S.idx];
-      var ok = got === want;
-      S.cells[S.idx].node.textContent = got === " " ? "␣" : got;
-      paintCell(S.idx, ok ? "ok" : "bad");
-      if (ok) S.hits++; else S.errors++;
-      if (!ok && S.strict) { S.blocked = true; paintCursor(); tick(); return; }
-      S.idx++;
-    }
-    paintCursor();
-    tick();
-    if (activeTiming() === "text" && S.idx >= S.target.length) finish();
+      row.appendChild(sample);
+
+      var box = document.createElement("div");
+      box.className = "answer-wrap";
+      var inp = document.createElement("input");
+      inp.className = "answer";
+      inp.type = "text";
+      inp.autocomplete = "off"; inp.autocorrect = "off"; inp.autocapitalize = "off";
+      inp.spellcheck = false;
+      inp.setAttribute("aria-label", "請輸入這一行的文字");
+      box.appendChild(inp);
+      row.appendChild(box);
+
+      el.lines.appendChild(row);
+      var idx = S.rows.length;
+      inp.addEventListener("input", function () { onLineInput(idx); });
+      inp.addEventListener("paste", function (e) { e.preventDefault(); });
+      inp.addEventListener("beforeinput", function (e) {
+        if (/paste|insertFromPaste|insertFromDrop/i.test(e.inputType || "")) e.preventDefault();
+      });
+      S.rows.push({ text: text, node: row, sample: sample, inp: inp, typed: "", counted: [] });
+    });
   }
 
-  function backspace() {
-    if (!S.running) return;
-    if (S.blocked) {
-      var cb = S.cells[S.idx];
-      if (cb) {
-        if (cb.state === "bad") S.errors = Math.max(0, S.errors - 1);
-        cb.node.textContent = cb.ch === " " ? "␣" : cb.ch;
-        paintCell(S.idx, "");
-      }
-      S.blocked = false;
-      paintCursor(); tick();
-      return;
+  function lineDone(r) {
+    var out = [];
+    for (var i = 0; i < r.text.length; i++) {
+      var ch = r.typed[i];
+      out.push('<span class="' + (ch === undefined ? "" : (ch === r.text[i] ? "ok" : "bad")) + '">'
+        + (ch === undefined ? "" : esc(ch)) + "</span>");
     }
-    if (S.idx === 0) return;
-    S.idx--;
-    var c = S.cells[S.idx];
-    if (c.state === "bad") S.errors = Math.max(0, S.errors - 1);
-    c.node.textContent = c.ch === " " ? "␣" : c.ch;
-    paintCell(S.idx, "");
-    paintCursor();
+    return out.join("");
+  }
+  function esc(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  // 範例列即時上色，讓你看見哪一個字打對了
+  function livePaint(r) {
+    var kids = r.sample.children;
+    for (var i = 0; i < kids.length; i++) {
+      var got = r.typed[i];
+      kids[i].className = got === undefined ? "" : (got === r.text[i] ? "ok" : "bad");
+      if (i === r.typed.length && got === undefined) kids[i].classList.add("cur");
+    }
+  }
+
+  // 統計一律從各行現況重算，避免增減字元時計數錯亂
+  // 定義：打對 = 一次就打對；打錯 = 這一格曾經打錯過（即使後來改對也照記）
+  function recount() {
+    var firstTry = 0, everWrong = 0, filled = 0;
+    S.rows.forEach(function (r) {
+      for (var i = 0; i < r.text.length; i++) {
+        var got = r.typed[i];
+        if (got === undefined) continue;
+        filled++;
+        if (r.counted[i]) everWrong++;
+        else if (got === r.text[i]) firstTry++;
+      }
+    });
+    S.hits = firstTry;
+    S.errors = everWrong;
+    S.filled = filled;
+  }
+
+  function onLineInput(i) {
+    var r = S.rows[i];
+    if (!r) return;
+    // 不用 maxLength（會干擾輸入法組字），改在超過行長時截掉多餘的字
+    var v = r.inp.value;
+    if (v.length > r.text.length) {
+      v = v.slice(0, r.text.length);
+      r.inp.value = v;
+    }
+    r.typed = v;
+    for (var k = 0; k < v.length; k++) {
+      if (v[k] !== r.text[k]) r.counted[k] = true;
+    }
+    livePaint(r);
+    recount();
+    beginRun();
+    if (v.length >= r.text.length) settle(i);
     tick();
+  }
+
+  function settle(i) {
+    var r = S.rows[i];
+    var wrong = 0;
+    for (var k = 0; k < r.text.length; k++) if (r.typed[k] !== r.text[k]) wrong++;
+    if (wrong && S.strict) {
+      r.node.classList.add("needs");
+      setHint("這一行有 " + wrong + " 個字不對，用退格改對後才能繼續。");
+      r.inp.focus();
+      tick();
+      return;                       // 留在本行，讓使用者用退格修正
+    }
+    r.node.classList.remove("needs");
+    r.node.classList.add("done");
+    var typed = document.createElement("div");
+    typed.className = "typed";
+    typed.innerHTML = lineDone(r);
+    r.inp.disabled = true;
+    r.node.querySelector(".answer-wrap").appendChild(typed);
+    r.node.querySelector(".answer-wrap").classList.add("locked");
+    S.li = i + 1;
+    setHint("");
+    if (S.li < S.rows.length) focusLine(S.li);
+    else if (activeTiming() === "time") { addBlock(nextLines()); focusLine(S.li); }
+    else finish();
+    tick();
+  }
+
+  function focusLine(i) {
+    var r = S.rows[i];
+    if (!r) return;
+    try { r.inp.focus({ preventScroll: true }); } catch (e) { r.inp.focus(); }
+    r.inp.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+
+  function setHint(msg) {
+    if (!el.hint) return;
+    el.hint.textContent = msg || "";
+    el.hint.hidden = !msg;
   }
 
   /* ---------------- 計時 ---------------- */
@@ -310,7 +412,9 @@
       if (S.started && left <= 0) { finish(); return; }
     } else {
       el.sTime.textContent = Math.floor(S.elapsed);
-      el.bar.style.width = (100 * S.idx / Math.max(1, S.target.length)) + "%";
+      var total = 0;
+      S.rows.forEach(function (r) { total += r.text.length; });
+      el.bar.style.width = (100 * (S.filled || 0) / Math.max(1, total)) + "%";
     }
     el.sSpeed.textContent = Math.round(speedOf());
     var tot = S.hits + S.errors;
@@ -328,24 +432,25 @@
   /* ---------------- 一般練習 ---------------- */
   function startNormal() {
     stopClock();
-    S.running = true; S.started = false; S.finished = false; S.blocked = false;
-    S.hits = 0; S.errors = 0; S.elapsed = 0; S.usedCustom = false;
+    S.running = true; S.started = false; S.finished = false;
+    S.hits = 0; S.errors = 0; S.filled = 0; S.elapsed = 0; S.usedCustom = false;
 
     show(el.paneNormal, true);
     show(el.paneLearn, false);
     clearKeys();
     resetView();
-    appendText(nextText());
+    addBlock(nextLines());
+    setHint("");
 
     el.unit.textContent = speedLabel();
     el.sTimeLab.textContent = activeTiming() === "time" ? "秒" : "已用秒";
     el.ghost.innerHTML = isHan()
-      ? "切到注音／中文輸入法，<b>直接開始打字</b>就會計時"
-      : "切到 <b>English</b> 輸入法，直接開始打字就會計時";
+      ? "點下方虛線列，切到注音輸入法開始打；<b>按 Enter 出字</b>後會自動比對"
+      : "點下方虛線列，切到 <b>English</b> 輸入法直接打";
     show(el.ghost, true);
     el.summaryText.textContent = summary();
     tick();
-    focusCap();
+    focusLine(0);
   }
 
   function finish() {
@@ -471,7 +576,7 @@
     if (h === "setup") syncSetupUI();
     if (h === "practice") { S.mode === "learn" ? startLearn() : startNormal(); }
     if (h === "home") { stopClock(); S.running = false; clearKeys(); }
-    if (h !== "practice") { try { el.cap.blur(); } catch (e) {} }
+    if (h !== "practice") { try { document.activeElement.blur(); } catch (e) {} }
   }
 
   function go(p) {
@@ -508,10 +613,6 @@
   }
 
   /* ---------------- 按鍵分發 ---------------- */
-  // 只有「輸入法正在處理」的事件才需要避開；一般按鍵絕對不能 preventDefault，
-  // 否則注音的第一個鍵（常常不是 229）會被吃掉，選字、空格換字全都無法用。
-  function isIME(e) { return e.keyCode === 229 || e.key === "Process" || e.isComposing; }
-
   var IGNORED = /^(Shift|Control|Alt|Meta|CapsLock|Tab|F\d|Arrow|Home|End|PageUp|PageDown|Insert|Delete)/;
 
   function onKeyDown(e) {
@@ -521,6 +622,15 @@
         $("pick-normal").click();
       }
       return;
+    }
+
+    // 全域擋貼上：Ctrl/⌘+V 在練習頁一律失效（輸入框本身也另有擋）
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && /^[vV]$/.test(e.key || "")) {
+      if (S.mode === "normal" || S.mode === "learn") {
+        var tg = e.target;
+        var inField = tg && tg.tagName === "TEXTAREA";   // 設定頁的自訂文本框允許貼上
+        if (!inField) { e.preventDefault(); return; }
+      }
     }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
 
@@ -532,19 +642,8 @@
       return;
     }
 
-    // 一般練習：文字一律從 input / composition 事件取，keydown 只負責後備鍵
-    if (isIME(e)) return;
-    if (e.code === "Escape") { e.preventDefault(); go("setup"); return; }
-    if (IGNORED.test(e.code)) return;
-    if (e.code === "Backspace") {
-      e.preventDefault();
-      if (S.started) backspace();
-    }
-  }
-
-  function focusCap() {
-    if (S.route !== "practice" || S.mode !== "normal") return;
-    try { el.cap.focus({ preventScroll: true }); } catch (e) { el.cap.focus(); }
+    // 一般練習：輸入全部交給原生 input（注音選字、Enter 出字才能正常運作）
+    if (e.code === "Escape") { e.preventDefault(); go("setup"); }
   }
 
   /* ---------------- 選項群 ---------------- */
@@ -569,15 +668,13 @@
 
   /* ---------------- init ---------------- */
   function init() {
-    ["cap", "view", "ghost", "bar", "typer", "keyboard", "prompt", "feedback",
+    ["lines", "hint", "ghost", "bar", "typer", "keyboard", "prompt", "feedback",
      "lRight", "lWrong", "lAcc", "lPos", "lTotal", "sSpeed", "sAcc", "sErr", "sTime",
      "sTimeLab", "unit", "rMain", "rMainLab", "rAcc", "rAccLab", "rErr", "rErrLab",
      "rHits", "rHitsLab", "rVerdict", "resultTitle", "theme", "custom", "summaryText"
     ].forEach(function (id) { el[id] = $(id); });
     el.paneNormal = $("pane-normal");
     el.paneLearn = $("pane-learn");
-    el.comp = document.createElement("i");
-    el.comp.className = "comp";
 
     var t = "dark";
     try { t = localStorage.getItem("tp-theme") || "dark"; } catch (e) {}
@@ -646,36 +743,22 @@
       el.custom.focus();
     });
 
-    // 開始／再来
+    // 開始／再來
     $("b-start").addEventListener("click", function () { go("practice"); });
     $("b-again").addEventListener("click", function () { go("practice"); });
     $("b-change").addEventListener("click", function () { go("setup"); });
 
-    // 練習區互動：文字一律從 input / composition 事件取，
-    // 這樣輸入法的選字、空格換字、Enter 確認都交給系統處理。
-    el.typer.addEventListener("mousedown", function (e) { e.preventDefault(); focusCap(); });
-    el.cap.addEventListener("compositionstart", function () { S.composing = true; beginRun(); });
-    el.cap.addEventListener("compositionupdate", function (e) { showComposing(e.data || el.cap.value || ""); });
-    el.cap.addEventListener("compositionend", function (e) {
-      S.composing = false;
-      var data = e.data || "";
-      el.cap.value = "";
-      showComposing("");
-      if (data) commit(data);
+    // 練習區：點擊文本區把焦點交回目前這一列；貼上一律擋掉
+    el.typer.addEventListener("mousedown", function (e) {
+      if (e.target.tagName === "INPUT") return;
+      e.preventDefault();
+      focusLine(S.li);
     });
-    el.cap.addEventListener("input", function (e) {
-      if (S.composing) return;                 // 組合中的拼音不計
-      // compositionend 已處理過的組字結果不再重複入帳
-      if (e && /CompositionText$/.test(e.inputType || "")) return;
-      var v = el.cap.value;
-      el.cap.value = "";
-      if (!v) return;
-      beginRun();
-      commit(v);
-    });
-    el.cap.addEventListener("paste", function (e) { e.preventDefault(); });
-    el.cap.addEventListener("blur", function () {
-      if (S.route === "practice" && S.mode === "normal") focusCap();
+    document.addEventListener("paste", function (e) {
+      if (S.route !== "practice") return;
+      var tg = e.target;
+      if (tg && tg.tagName === "TEXTAREA") return;     // 自訂文本框允許貼上
+      e.preventDefault();
     });
 
     document.addEventListener("keydown", onKeyDown);
