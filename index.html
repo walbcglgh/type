@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>打字練習｜Type Practice</title>
-<meta name="description" content="中英文打字練習與注音符號鍵位學習，純靜態網頁。">
+<meta name="description" content="中英文與唐詩打字練習，並附台灣標準注音鍵盤鍵位學習。">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⌨️</text></svg>">
 <link rel="stylesheet" href="css/style.css">
 </head>
@@ -12,125 +12,153 @@
 <div class="wrap">
 
   <header class="top">
-    <div class="brand">
+    <a class="brand" href="#/" id="brand">
       <span class="logo">⌨</span>
       <span>打字練習<small>TYPE PRACTICE</small></span>
-    </div>
+    </a>
     <button id="theme" class="icon-btn" type="button">☀️ 淺色</button>
   </header>
 
-  <!-- 設定 -->
-  <section class="card">
-    <div class="row-label">
-      <span>模式</span>
-      <div class="seg">
-        <button id="m-normal" type="button" aria-pressed="true">一般模式</button>
-        <button id="m-learn" type="button" aria-pressed="false">學習模式</button>
-      </div>
-    </div>
+  <!-- ══════════ 1. 首頁：選模式 ══════════ -->
+  <section class="page" id="page-home">
+    <h1 class="hero">今天想練什麼？</h1>
+    <p class="hero-sub">選一個開始，下一步會讓你確認所有設定。</p>
 
-    <div class="row-label" id="row-lang">
-      <span>素材</span>
-      <div class="seg">
-        <button id="l-zh" type="button" aria-pressed="true">中文</button>
-        <button id="l-poem" type="button" aria-pressed="false">唐詩</button>
-        <button id="l-en" type="button" aria-pressed="false">英文</button>
-      </div>
-    </div>
-
-    <div class="row-label" id="row-tier" hidden>
-      <span>唐詩難度</span>
-      <div class="seg">
-        <button id="k-e" type="button" aria-pressed="true">易・常用字</button>
-        <button id="k-m" type="button" aria-pressed="false">中</button>
-        <button id="k-h" type="button" aria-pressed="false">難</button>
-      </div>
-    </div>
-
-    <div class="row-label" id="row-timing">
-      <span>計量方式</span>
-      <div class="seg">
-        <button id="t-time" type="button" aria-pressed="true">計時</button>
-        <button id="t-text" type="button" aria-pressed="false">計字</button>
-      </div>
-    </div>
-
-    <div class="row-label" id="row-duration">
-      <span>秒數</span>
-      <div class="seg">
-        <button id="d-15" type="button" aria-pressed="false">15</button>
-        <button id="d-30" type="button" aria-pressed="false">30</button>
-        <button id="d-60" type="button" aria-pressed="true">60</button>
-        <button id="d-120" type="button" aria-pressed="false">120</button>
-      </div>
-    </div>
-
-    <div class="row-label" id="row-strict">
-      <span>打錯時</span>
-      <div class="seg">
-        <button id="e-go" type="button" aria-pressed="true">可繼續往下打</button>
-        <button id="e-fix" type="button" aria-pressed="false">要改對才能繼續</button>
-      </div>
-    </div>
-
-    <div class="row-label" id="row-group" hidden>
-      <span>練習範圍</span>
-      <div class="seg">
-        <button id="g-all" type="button" aria-pressed="true">全部</button>
-        <button id="g-shengmu" type="button" aria-pressed="false">聲母</button>
-        <button id="g-jiemu" type="button" aria-pressed="false">介音</button>
-        <button id="g-yunmu" type="button" aria-pressed="false">韻母</button>
-        <button id="g-tone" type="button" aria-pressed="false">聲調</button>
-      </div>
-    </div>
-
-    <div class="row-label" id="row-hint" hidden>
-      <span>黃色提示</span>
-      <div class="seg">
-        <button id="h-on" type="button" aria-pressed="true">開啟</button>
-        <button id="h-off" type="button" aria-pressed="false">關閉</button>
-      </div>
-    </div>
-
-    <div class="row-label" id="row-custom">
-      <span>自訂文本</span>
-      <div class="custom-box">
-        <textarea id="custom" placeholder="貼上想練的文字，按「練習這段文字」"></textarea>
-        <div class="actions">
-          <button id="b-custom" class="btn" type="button">練習這段文字</button>
-          <span class="hint">會以「計字」方式進行</span>
-        </div>
-      </div>
+    <div class="modes">
+      <button class="mode-card" type="button" id="pick-normal" data-mode="normal">
+        <span class="mc-ico">⌨️</span>
+        <span class="mc-t">一般練習</span>
+        <span class="mc-d">看文本打字，只比對字元。可選中文、唐詩或英文，計時或計字。</span>
+        <span class="mc-go">選擇 →</span>
+      </button>
+      <button class="mode-card" type="button" id="pick-learn" data-mode="learn">
+        <span class="mc-ico">ㄅ</span>
+        <span class="mc-t">注音鍵位學習</span>
+        <span class="mc-d">螢幕出注音符號，你按對應的實體鍵。鍵盤高亮下一個該按的鍵。</span>
+        <span class="mc-go">選擇 →</span>
+      </button>
     </div>
   </section>
 
-  <!-- 練習區 -->
-  <section class="card">
+  <!-- ══════════ 2. 設定頁 ══════════ -->
+  <section class="page" id="page-setup" hidden>
+    <div class="page-head">
+      <a class="back" href="#/">← 回首頁</a>
+      <h2 id="setupTitle">練習設定</h2>
+    </div>
 
-    <!-- 一般模式 -->
-    <div id="normalPane">
+    <!-- 一般練習的設定 -->
+    <div id="setup-normal" class="card">
+      <div class="row-label">
+        <span>素材</span>
+        <div class="seg">
+          <button id="l-zh" type="button" aria-pressed="true">中文</button>
+          <button id="l-poem" type="button" aria-pressed="false">唐詩</button>
+          <button id="l-en" type="button" aria-pressed="false">英文</button>
+        </div>
+      </div>
+
+      <div class="row-label" id="row-tier" hidden>
+        <span>唐詩難度</span>
+        <div class="seg">
+          <button id="k-e" type="button" aria-pressed="true">易・常用字</button>
+          <button id="k-m" type="button" aria-pressed="false">中</button>
+          <button id="k-h" type="button" aria-pressed="false">難</button>
+        </div>
+      </div>
+
+      <div class="row-label">
+        <span>計量方式</span>
+        <div class="seg">
+          <button id="t-time" type="button" aria-pressed="true">計時</button>
+          <button id="t-text" type="button" aria-pressed="false">計字</button>
+        </div>
+      </div>
+
+      <div class="row-label" id="row-duration">
+        <span>秒數</span>
+        <div class="seg">
+          <button id="d-15" type="button" aria-pressed="false">15</button>
+          <button id="d-30" type="button" aria-pressed="false">30</button>
+          <button id="d-60" type="button" aria-pressed="true">60</button>
+          <button id="d-120" type="button" aria-pressed="false">120</button>
+        </div>
+      </div>
+
+      <div class="row-label">
+        <span>打錯時</span>
+        <div class="seg">
+          <button id="e-go" type="button" aria-pressed="true">可繼續往下打</button>
+          <button id="e-fix" type="button" aria-pressed="false">要改對才能繼續</button>
+        </div>
+      </div>
+
+      <div class="row-label">
+        <span>自訂文本</span>
+        <div class="custom-box">
+          <textarea id="custom" placeholder="要練自己的文字就貼這裡，留空則使用題庫"></textarea>
+          <button id="b-clear" class="btn tiny" type="button">清空，改用題庫</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 學習模式的設定 -->
+    <div id="setup-learn" class="card" hidden>
+      <div class="row-label">
+        <span>練習範圍</span>
+        <div class="seg">
+          <button id="g-all" type="button" aria-pressed="true">全部</button>
+          <button id="g-shengmu" type="button" aria-pressed="false">聲母</button>
+          <button id="g-jiemu" type="button" aria-pressed="false">介音</button>
+          <button id="g-yunmu" type="button" aria-pressed="false">韻母</button>
+          <button id="g-tone" type="button" aria-pressed="false">聲調</button>
+        </div>
+      </div>
+
+      <div class="row-label">
+        <span>黃色提示</span>
+        <div class="seg">
+          <button id="h-on" type="button" aria-pressed="true">開啟</button>
+          <button id="h-off" type="button" aria-pressed="false">關閉</button>
+        </div>
+      </div>
+
+      <p class="note">開啟時比較像認鍵位；關掉之後，螢幕出符號、你要自己記得按哪個鍵。</p>
+    </div>
+
+    <div class="cta">
+      <button id="b-start" class="btn primary big-btn" type="button">開始練習</button>
+      <p class="cta-hint" id="ctaHint"></p>
+    </div>
+  </section>
+
+  <!-- ══════════ 3. 練習頁 ══════════ -->
+  <section class="page" id="page-practice" hidden>
+    <div class="summary">
+      <span id="summaryText"></span>
+      <a class="edit" href="#/setup" id="b-edit">修改</a>
+    </div>
+
+    <!-- 一般練習 -->
+    <div id="pane-normal">
       <div class="stats">
         <div class="stat"><b id="sSpeed">0</b><span id="unit">字/分</span></div>
         <div class="stat"><b id="sAcc">100</b><span>正確率 %</span></div>
         <div class="stat"><b id="sErr">0</b><span>打錯字數</span></div>
-        <div class="stat"><b id="sTime">60</b><span>秒</span></div>
+        <div class="stat"><b id="sTime">60</b><span id="sTimeLab">秒</span></div>
       </div>
 
       <div class="typer" id="typer">
-        <div class="text-view" id="view"></div>
-        <input id="cap" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" tabindex="-1">
+        <div class="lines" id="lines"></div>
         <div class="ghost" id="ghost">準備好了，直接開始打字</div>
       </div>
       <div class="bar"><i id="bar"></i></div>
-
-      <div class="actions">
-        <button id="b-restart" class="btn primary" type="button">重新開始</button>
-        <span class="hint">按 <kbd>Esc</kbd> 也可重來；打錯可用 <kbd>⌫</kbd> 修正</span>
-      </div>
+      <p class="line-hint" id="hint" hidden></p>
+      <p class="tip">用你慣用的輸入法把這一行的字打出來，打滿會自動換下一行；想中止按 <kbd>Esc</kbd></p>
     </div>
 
     <!-- 學習模式 -->
-    <div id="learnPane" hidden>
+    <div id="pane-learn" hidden>
       <div class="learn-top">
         <div class="prompt-box">
           <div class="prompt-label">請按下這個注音符號</div>
@@ -141,17 +169,29 @@
           <div class="stat"><b id="lRight">0</b><span>答對</span></div>
           <div class="stat"><b id="lWrong">0</b><span>答錯</span></div>
           <div class="stat"><b id="lAcc">—</b><span>正確率</span></div>
-          <div class="stat"><b><span id="lPos">1</span>/<span id="lTotal">37</span></b><span>題號</span></div>
+          <div class="stat"><b><span id="lPos">1</span>/<span id="lTotal">42</span></b><span>題號</span></div>
         </div>
       </div>
-      <div class="actions">
-        <button id="b-new" class="btn primary" type="button">換一輪</button>
-        <span class="hint">按對自動出下一題；按錯會紅燈提示，並留在原題</span>
+      <p class="tip">按對自動出下一題；按錯會紅燈提示，並留在原題直到按對。</p>
+
+      <div class="card kbd-card">
+        <h2>鍵盤對照（大千式／Windows・macOS 標準注音）</h2>
+        <div class="kbd-wrap">
+          <div class="keyboard" id="keyboard"></div>
+        </div>
+        <div class="klegend">
+          <span><i class="lg-hint"></i>下一個該按的鍵</span>
+          <span><i class="lg-hit"></i>按對了</span>
+          <span><i class="lg-miss"></i>按錯了</span>
+        </div>
       </div>
     </div>
+  </section>
 
-    <!-- 結果 -->
-    <div class="results" id="results">
+  <!-- ══════════ 4. 結果頁 ══════════ -->
+  <section class="page" id="page-result" hidden>
+    <h2 class="result-title" id="resultTitle">這一輪的結果</h2>
+    <div class="card">
       <div class="big">
         <div><b id="rMain">0</b><span id="rMainLab">速度</span></div>
         <div><b id="rAcc">0%</b><span id="rAccLab">正確率</span></div>
@@ -160,24 +200,16 @@
       </div>
       <p class="verdict" id="rVerdict"></p>
     </div>
-  </section>
-
-  <!-- 鍵盤 -->
-  <section class="card" id="keyboardWrap" hidden>
-    <h2>鍵盤對照（大千式／Windows・macOS 標準注音）</h2>
-    <div class="kbd-wrap">
-      <div class="keyboard" id="keyboard"></div>
-    </div>
-    <div class="klegend">
-      <span><i class="lg-hint"></i>下一個該按的鍵</span>
-      <span><i class="lg-hit"></i>按對了</span>
-      <span><i class="lg-miss"></i>按錯了</span>
+    <div class="cta">
+      <button id="b-again" class="btn primary big-btn" type="button">再練一次</button>
+      <div class="cta-row">
+        <button id="b-change" class="btn" type="button">換設定</button>
+        <a id="b-home" class="btn" href="#/">回首頁</a>
+      </div>
     </div>
   </section>
 
-  <footer>
-    純靜態網頁，資料存在你自己的瀏覽器裡。
-  </footer>
+  <footer>純靜態網頁，資料存在你自己的瀏覽器裡。</footer>
 </div>
 
 <script src="js/data.js"></script>
