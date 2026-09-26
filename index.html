@@ -1,8 +1,89 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>我的第一個網頁</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0e13">
+<title>打字練習場 · Typing</title>
+<link rel="stylesheet" href="styles.css">
 </head>
+<body>
+<header class="topbar">
+  <h1 class="brand">打字<span>練習場</span></h1>
+  <div class="lang-switch" role="tablist" aria-label="語言">
+    <button class="chip is-active" data-lang="en" role="tab" aria-selected="true">EN</button>
+    <button class="chip" data-lang="zh" role="tab" aria-selected="false">中文</button>
+  </div>
+</header>
+
+<main>
+  <section class="toolbar">
+    <div class="group" id="mode-group" role="group" aria-label="模式">
+      <button class="chip is-active" data-mode="time">限時</button>
+      <button class="chip" data-mode="count">練習</button>
+    </div>
+    <div class="group" id="time-group" role="group" aria-label="秒數">
+      <button class="chip" data-time="15">15</button>
+      <button class="chip" data-time="30">30</button>
+      <button class="chip is-active" data-time="60">60</button>
+      <button class="chip" data-time="120">120</button>
+    </div>
+    <div class="group" id="count-group" hidden role="group" aria-label="字數">
+      <button class="chip" data-count="20">20</button>
+      <button class="chip is-active" data-count="50">50</button>
+      <button class="chip" data-count="100">100</button>
+      <button class="chip" data-count="200">200</button>
+    </div>
+    <button class="ghost" id="restart" title="重新開始（Tab）">↺ 重來</button>
+  </section>
+
+  <section class="live">
+    <div id="timer" class="timer">60</div>
+    <div class="metrics">
+      <span><b id="m-wpm">0</b><i>WPM</i></span>
+      <span><b id="m-acc">100</b><i>精確度</i></span>
+      <span><b id="m-combo">0</b><i>連擊</i></span>
+    </div>
+  </section>
+
+  <section class="stage" id="stage" aria-label="打字區">
+    <div class="scroller" id="scroller">
+      <div class="track" id="track">
+        <div class="text" id="text"></div>
+        <div class="line-hold" id="lineHold"><span class="caret"></span><span class="composing"></span></div>
+      </div>
+    </div>
+    <input id="capture" class="capture" type="text" autocomplete="off" autocapitalize="off"
+           autocorrect="off" spellcheck="false" aria-label="輸入文字的欄位">
+    <button class="veil" id="veil">
+      <span class="veil-key">點擊這裡</span>
+      <span class="veil-sub">開始打字 · 手機用螢幕鍵盤、電腦直接敲</span>
+    </button>
+  </section>
+
+  <p class="hint">打錯不用怕，空格才算結算一個字。中文請用注音／倉頡等輸入法正常打字，標點也要打出來。</p>
+</main>
+
+<div class="results" id="results" hidden>
+  <div class="card">
+    <h2>成績</h2>
+    <div class="big">
+      <div><b id="r-wpm">0</b><i id="r-wpm-unit">WPM</i></div>
+      <div><b id="r-acc">0</b><i>精確度 %</i></div>
+    </div>
+    <div class="small">
+      <span>字／分 <b id="r-cpm">0</b></span>
+      <span>正確 <b id="r-correct">0</b></span>
+      <span>錯誤 <b id="r-wrong">0</b></span>
+      <span>最高連擊 <b id="r-combo">0</b></span>
+    </div>
+    <div class="actions">
+      <button id="again" class="primary">再來一輪</button>
+      <button id="close-results" class="ghost">關閉</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
 </html>
