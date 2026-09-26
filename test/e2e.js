@@ -1,3 +1,6 @@
+/* 四頁向導 E2E：首頁選模式 → 設定頁 → 練習頁 → 結果頁
+ * 執行：node test/e2e.js（需已安裝 playwright 與 /usr/bin/chromium）
+ */
 const { chromium } = require('playwright');
 const path = require('path');
 
@@ -9,6 +12,30 @@ function check(name, cond, extra) {
   else { fails++; log('  FAIL ' + name + (extra ? ' -> ' + extra : '')); }
 }
 
+/* 用隱藏 input 的 composition 事件模擬注音／倉頡輸入法 */
+async function typeChars(page, chars) {
+  for (const ch of chars) {
+    await page.evaluate((c) => {
+      const cap = document.getElementById('cap');
+      cap.focus();
+      cap.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }));
+      cap.value = c;
+      cap.dispatchEvent(new CompositionEvent('compositionend', { data: c }));
+    }, ch);
+    await page.waitForTimeout(25);
+  }
+}
+const targetChars = (page) =>
+  page.evaluate(() => Array.from(document.querySelectorAll('#view span')).map(s => s.dataset.ch));
+const codeOfSym = (page, sym) =>
+  page.evaluate(s => {
+    const D = window.TP_DATA;
+    return Object.keys(D.BOPOMOFO).find(k => D.BOPOMOFO[k] === s);
+  }, sym);
+
+async function visible(page, sel) { return page.locator(sel).isVisible(); }
+async function hidden(page, sel) { return !(await page.locator(sel).isVisible()); }
+
 (async () => {
   const browser = await chromium.launch({ executablePath: '/usr/bin/chromium', args: ['--no-sandbox'] });
   const page = await browser.newPage({ viewport: { width: 1200, height: 1000 } });
@@ -19,299 +46,339 @@ function check(name, cond, extra) {
   await page.goto(URL);
   await page.waitForTimeout(400);
 
-  log('\n[1] 載入與預設狀態');
+  /* ---------- 1. 首頁 ---------- */
+  log('\n[1] 首頁：只看到模式選擇');
   check('標題正確', (await page.title()).includes('打字練習'));
-  check('一般模式預設啟用', await page.locator('#normalPane').isVisible());
-  check('學習面板預設隱藏', !(await page.locator('#learnPane').isVisible()));
-  check('鍵盤預設隱藏', !(await page.locator('#keyboardWrap').isVisible()));
-  const chars = await page.locator('#view span').count();
-  check('已渲染目標文字', chars > 10, 'cells=' + chars);
-  check('提示層可見', await page.locator('#ghost').isVisible());
+  check('首頁可見', await visible(page, '#page-home'));
+  check('設定頁隱藏', await hidden(page, '#page-setup'));
+  check('練習頁隱藏', await hidden(page, '#page-practice'));
+  check('結果頁隱藏', await hidden(page, '#page-result'));
+  check('預設停在首頁', ['', '#/'].includes(await page.evaluate(() => location.hash)));
+  check('兩張模式卡', (await page.locator('.mode-card').count()) === 2);
 
-  log('\n[2] 一般模式：中文輸入（模擬 IME composition）');
-  const target = await page.evaluate(() => window.__tp ? null : document.getElementById('view').textContent);
-  // 取前 8 個字元當作要打的內容
-  const first8 = (await page.evaluate(() => Array.from(document.querySelectorAll('#view span')).map(s => s.dataset.ch).slice(0, 8)));
-  check('可讀取目標字元', first8.length === 8, JSON.stringify(first8));
+  /* ---------- 2. 設定頁（一般模式） ---------- */
+  log('\n[2] 一般模式 → 設定頁');
+  await page.click('#pick-normal');
+  await page.waitForTimeout(300);
+  check('hash 變 #/setup', (await page.evaluate(() => location.hash)) === '#/setup');
+  check('設定頁可見', await visible(page, '#page-setup'));
+  check('首頁已隱藏', await hidden(page, '#page-home'));
+  check('顯示一般設定卡', await visible(page, '#setup-normal'));
+  check('隱藏學習設定卡', await hidden(page, '#setup-learn'));
+  check('預設不顯示唐詩難度', await hidden(page, '#row-tier'));
+  check('預設計時顯示秒數', await visible(page, '#row-duration'));
+  check('CTA 有摘要', (await page.textContent('#ctaHint')).includes('計時'));
 
-  // 用隐藏 input + composition 事件模擬注音輸入法
-  await page.click('#typer');
-  for (const ch of first8) {
-    await page.evaluate((c) => {
-      const cap = document.getElementById('cap');
-      cap.focus();
-      cap.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }));
-      cap.value = c;
-      cap.dispatchEvent(new CompositionEvent('compositionend', { data: c }));
-    }, ch);
-    await page.waitForTimeout(30);
-  }
-  const okCount = await page.locator('#view span.ok').count();
-  check('8 字全對 → 標綠', okCount === 8, 'ok=' + okCount);
-  check('計時已啟動', await page.evaluate(() => +document.getElementById('sTime').textContent < 60 || true));
-  const accAfterGood = await page.textContent('#sAcc');
-  check('正確率 100%', accAfterGood === '100', 'acc=' + accAfterGood);
-
-  log('\n[3] 一般模式：打錯字要累計錯誤');
-  await page.evaluate(() => {
-    const cap = document.getElementById('cap');
-    cap.focus();
-    cap.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }));
-    cap.value = 'X';
-    cap.dispatchEvent(new CompositionEvent('compositionend', { data: 'X' }));
-  });
-  await page.waitForTimeout(60);
-  const badCount = await page.locator('#view span.bad').count();
-  const errShown = await page.textContent('#sErr');
-  check('出現紅色錯字', badCount === 1, 'bad=' + badCount);
-  check('錯誤計數 = 1', errShown === '1', 'err=' + errShown);
-
-  log('\n[4] 一般模式：退格可修正錯誤');
-  await page.keyboard.press('Backspace');
-  await page.waitForTimeout(60);
-  check('退格後錯誤歸零', (await page.textContent('#sErr')) === '0', 'err=' + (await page.textContent('#sErr')));
-  check('退格後紅字消失', (await page.locator('#view span.bad').count()) === 0);
-
-  log('\n[5] 嚴格模式：打錯要改對才能繼續');
+  log('  · 選項互動');
+  await page.click('#l-poem');
+  await page.waitForTimeout(150);
+  check('選唐詩後出現難度列', await visible(page, '#row-tier'));
+  check('難度預設＝易', (await page.getAttribute('#k-e', 'aria-pressed')) === 'true');
+  await page.click('#k-h');
+  await page.waitForTimeout(120);
+  check('可選難', (await page.getAttribute('#k-h', 'aria-pressed')) === 'true');
+  await page.click('#t-text');
+  await page.waitForTimeout(120);
+  check('計字模式隱藏秒數列', await hidden(page, '#row-duration'));
+  await page.click('#t-time');
+  await page.click('#d-30');
   await page.click('#e-fix');
-  await page.waitForTimeout(100);
-  const idxBefore = await page.evaluate(() => document.querySelectorAll('#view span.cur').length);
-  await page.evaluate(() => {
-    const cap = document.getElementById('cap');
-    cap.focus();
-    cap.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }));
-    cap.value = 'Z';
-    cap.dispatchEvent(new CompositionEvent('compositionend', { data: 'Z' }));
-  });
+  await page.click('#l-zh');
+  await page.waitForTimeout(150);
+  check('切回中文後難度列隱藏', await hidden(page, '#row-tier'));
+  check('摘要含 30 秒', (await page.textContent('#ctaHint')).includes('30 秒'), await page.textContent('#ctaHint'));
+  check('摘要含嚴格模式', (await page.textContent('#ctaHint')).includes('要改對'));
+
+  /* ---------- 3. 練習頁（一般模式） ---------- */
+  log('\n[3] 練習頁：開始打字');
+  await page.click('#b-start');
+  await page.waitForTimeout(300);
+  check('hash 變 #/practice', (await page.evaluate(() => location.hash)) === '#/practice');
+  check('練習頁可見', await visible(page, '#page-practice'));
+  check('頂部摘要可見', (await page.textContent('#summaryText')).includes('計時 30 秒'));
+  check('有「修改」連結', await visible(page, '#b-edit'));
+  check('一般面板可見', await visible(page, '#pane-normal'));
+  check('學習面板隱藏', await hidden(page, '#pane-learn'));
+  check('渲染出目標文字', (await targetChars(page)).length > 10);
+  check('提示層可見', await visible(page, '#ghost'));
+
+  const chars = await targetChars(page);
+  await page.click('#typer');
+  await typeChars(page, chars.slice(0, 8));
+  check('8 字全對標綠', (await page.locator('#view span.ok').count()) === 8);
+  check('正確率 100%', (await page.textContent('#sAcc')) === '100');
+  check('計時已啟動（提示層消失）', await hidden(page, '#ghost'));
+
+  log('  · 打錯與退格');
+  await typeChars(page, ['X']);
   await page.waitForTimeout(60);
-  const blocked = await page.evaluate(() => {
-    const cur = document.querySelector('#view span.cur');
-    return cur ? cur.textContent : null;
-  });
-  check('卡在同一格（未前進）', blocked !== null && blocked === 'Z', 'cur=' + blocked);
+  check('出現紅色錯字', (await page.locator('#view span.bad').count()) === 1);
+  check('錯誤計數 = 1', (await page.textContent('#sErr')) === '1');
   await page.keyboard.press('Backspace');
-  await page.waitForTimeout(50);
+  await page.waitForTimeout(60);
+  check('退格後錯誤歸零', (await page.textContent('#sErr')) === '0');
+
+  log('  · 嚴格模式卡住');
+  const curBefore = await page.evaluate(() => document.querySelectorAll('#view span.cur').length);
+  await typeChars(page, ['Z']);
+  await page.waitForTimeout(60);
+  const blockedTxt = await page.evaluate(() => {
+    const c = document.querySelector('#view span.cur');
+    return c ? c.textContent : null;
+  });
+  check('打錯後卡在同一格', curBefore === 1 && blockedTxt === 'Z', 'cur=' + blockedTxt);
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(60);
   const unblocked = await page.evaluate(() => {
-    const cur = document.querySelector('#view span.cur');
-    return cur ? cur.textContent : null;
+    const c = document.querySelector('#view span.cur');
+    return c ? c.textContent : null;
   });
   check('退格後解鎖', unblocked !== 'Z', 'cur=' + unblocked);
-  await page.click('#e-go');
-  await page.waitForTimeout(80);
 
-  log('\n[6] 學習模式：鍵盤與出題');
-  await page.click('#m-learn');
+  log('  · Esc 回設定頁');
+  await page.keyboard.press('Escape');
   await page.waitForTimeout(300);
-  check('學習面板顯示', await page.locator('#learnPane').isVisible());
-  check('鍵盤顯示', await page.locator('#keyboardWrap').isVisible());
-  check('一般面板隱藏', !(await page.locator('#normalPane').isVisible()));
-  const total = +(await page.textContent('#lTotal'));
-  check('全部範圍共 42 鍵（37 符號 + 5 聲調）', total === 42, 'total=' + total);
-  const keyCount = await page.locator('.key').count();
-  check('鍵盤鍵帽數量合理', keyCount > 55, 'keys=' + keyCount);
-  const hintKeys = await page.locator('.key.hint').count();
-  check('黃色提示已亮起', hintKeys >= 1, 'hint=' + hintKeys);
-  const prompt1 = (await page.textContent('#prompt')).trim();
-  check('題目是注音符號', /[ㄅ-ㄩˇˋˊ˙ˉ]/.test(prompt1), 'prompt=' + prompt1);
+  check('hash 退回 #/setup', (await page.evaluate(() => location.hash)) === '#/setup');
+  check('設定頁可見', await visible(page, '#page-setup'));
+  check('嚴格模式開關仍記住', (await page.getAttribute('#e-fix', 'aria-pressed')) === 'true');
+  await page.click('#e-go');
+  await page.waitForTimeout(120);
 
-  log('\n[7] 學習模式：按錯 → 紅燈、留在原題、計數');
-  const hintCode = await page.evaluate(() => {
+  /* ---------- 4. 計字模式打完 → 結果頁 ---------- */
+  log('\n[4] 計字模式打完一篇 → 結果頁');
+  await page.click('#t-text');
+  await page.waitForTimeout(120);
+  await page.click('#b-start');
+  await page.waitForTimeout(300);
+  // 練習頁進入時應重設為全新的一輪
+  check('進入即為新的一輪', (await page.textContent('#sErr')) === '0');
+  const full = await targetChars(page);
+  await page.click('#typer');
+  await typeChars(page, full);
+  await page.waitForTimeout(400);
+  check('打完跳結果頁', (await page.evaluate(() => location.hash)) === '#/result');
+  check('結果頁可見', await visible(page, '#page-result'));
+  check('打對字數 = 全文長度', (await page.textContent('#rHits')) === String(full.length), await page.textContent('#rHits'));
+  check('含速度數字', /^\d+$/.test(await page.textContent('#rMain')));
+  check('含評語', (await page.textContent('#rVerdict')).length > 5);
+  check('結果標題帶摘要', (await page.textContent('#resultTitle')).includes('計字'));
+
+  log('  · 再練一次 / 換設定 / 回首頁');
+  await page.click('#b-again');
+  await page.waitForTimeout(300);
+  check('再練一次 → 練習頁', (await page.evaluate(() => location.hash)) === '#/practice');
+  const reset = await page.evaluate(() => document.querySelectorAll('#view span.ok').length);
+  check('重新渲染未打的文本', reset === 0, 'ok=' + reset);
+  await page.click('#b-edit');
+  await page.waitForTimeout(300);
+  check('修改連結回設定頁', (await page.evaluate(() => location.hash)) === '#/setup');
+  await page.click('#b-start');
+  await page.waitForTimeout(250);
+  await page.goBack();
+  await page.waitForTimeout(300);
+  check('瀏覽器上一頁回設定頁', (await page.evaluate(() => location.hash)) === '#/setup');
+  await page.goForward();
+  await page.waitForTimeout(300);
+  check('下一頁回練習頁', (await page.evaluate(() => location.hash)) === '#/practice');
+
+  /* ---------- 5. 自訂文本 ---------- */
+  log('\n[5] 自訂文本');
+  await page.goBack();
+  await page.waitForTimeout(250);
+  await page.fill('#custom', '測試 123');
+  await page.waitForTimeout(150);
+  check('自訂文本摘要走計字', (await page.textContent('#ctaHint')).includes('自訂文本'), await page.textContent('#ctaHint'));
+  check('自訂文本隱藏秒數', await hidden(page, '#row-duration'));
+  await page.click('#b-start');
+  await page.waitForTimeout(300);
+  const customTxt = (await targetChars(page)).join('');
+  check('載入自訂文本', customTxt === '測試 123', JSON.stringify(customTxt));
+  await typeChars(page, (await targetChars(page)));
+  await page.waitForTimeout(300);
+  check('打完自訂文本進結果頁', (await page.evaluate(() => location.hash)) === '#/result');
+  await page.click('#b-change');
+  await page.waitForTimeout(250);
+  await page.click('#b-clear');
+  await page.waitForTimeout(200);
+  // 清空後回到題庫，且沿用設定頁本身的計量方式（此時仍是計字）
+  check('清空後改用題庫', !(await page.textContent('#ctaHint')).includes('自訂文本'), await page.textContent('#ctaHint'));
+  check('清空後按設定顯示秒數（計字→隱藏）', await hidden(page, '#row-duration'));
+  await page.click('#t-time');
+  await page.waitForTimeout(150);
+  check('切回計時後秒數列回來', await visible(page, '#row-duration'));
+
+  /* ---------- 6. 學習模式 ---------- */
+  log('\n[6] 首頁 → 學習模式設定');
+  await page.click('.back');
+  await page.waitForTimeout(300);
+  check('回首頁', (await page.evaluate(() => location.hash)) === '#/');
+  await page.click('#pick-learn');
+  await page.waitForTimeout(300);
+  check('顯示學習設定卡', await visible(page, '#setup-learn'));
+  check('隱藏一般設定卡', await hidden(page, '#setup-normal'));
+  check('標題為鍵位設定', (await page.textContent('#setupTitle')).includes('鍵位'));
+  check('提示預設開啟', (await page.getAttribute('#h-on', 'aria-pressed')) === 'true');
+  await page.click('#g-tone');
+  await page.waitForTimeout(150);
+  check('摘要含聲調', (await page.textContent('#ctaHint')).includes('聲調'));
+  await page.click('#h-off');
+  await page.waitForTimeout(120);
+  check('摘要含提示關閉', (await page.textContent('#ctaHint')).includes('關閉'));
+
+  log('\n[7] 學習模式練習');
+  await page.click('#b-start');
+  await page.waitForTimeout(300);
+  check('學習面板可見', await visible(page, '#pane-learn'));
+  check('鍵盤渲染', (await page.locator('.key').count()) > 55);
+  check('聲調範圍 = 5 題', (await page.textContent('#lTotal')) === '5', await page.textContent('#lTotal'));
+  check('提示關閉時不亮黃鍵', (await page.locator('.key.hint').count()) === 0);
+  const p1 = (await page.textContent('#prompt')).trim();
+  check('題目是注音符號', /[ㄅ-ㄩˇˋˊ˙ˉ]/.test(p1), p1);
+
+  const right1 = await codeOfSym(page, p1);
+  const wrongKey = ["KeyQ", "KeyW", "KeyE", "KeyR", "KeyA", "KeyS"].find(c => c !== right1);
+  await page.keyboard.press(wrongKey);
+  await page.waitForTimeout(150);
+  check('按錯紅燈', (await page.locator('.key.miss').count()) >= 1);
+  check('按錯計數 = 1', (await page.textContent('#lWrong')) === '1');
+  check('留在原題', (await page.textContent('#lPos')) === '1' && (await page.textContent('#prompt')).trim() === p1);
+
+  await page.waitForTimeout(600);
+  await page.keyboard.press(right1);
+  await page.waitForTimeout(200);
+  check('按對跳下一題', (await page.textContent('#lPos')) === '2' && (await page.textContent('#lRight')) === '1');
+
+  log('\n[8] 黃色提示開關（設定頁改，練習頁生效）');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(250);
+  await page.click('#h-on');
+  await page.click('#g-all');
+  await page.waitForTimeout(120);
+  await page.click('#b-start');
+  await page.waitForTimeout(300);
+  check('全部範圍 = 42 鍵', (await page.textContent('#lTotal')) === '42', await page.textContent('#lTotal'));
+  check('提示開啟亮黃鍵', (await page.locator('.key.hint').count()) >= 1);
+  const hintSym = await page.evaluate(() => {
     const k = document.querySelector('.key.hint');
     return k ? k.querySelector('.kcap-boo').textContent : null;
   });
-  check('提示鍵與題目一致', hintCode === prompt1, `hint=${hintCode} prompt=${prompt1}`);
-  // 故意按一個絕對不一樣的鍵
-  const right1 = await page.evaluate((sym) => {
-    const D = window.TP_DATA;
-    return Object.keys(D.BOPOMOFO).find(k => D.BOPOMOFO[k] === sym);
-  }, prompt1);
-  const candidates = ["KeyQ", "KeyW", "KeyE", "KeyR", "KeyA", "KeyS", "KeyD", "KeyF"];
-  const wrongKey = candidates.find(c => c !== right1);
-  await page.keyboard.press(wrongKey);
-  await page.waitForTimeout(120);
-  check('答錯計數 = 1', (await page.textContent('#lWrong')) === '1', 'wrong=' + (await page.textContent('#lWrong')));
-  check('題號沒前進', (await page.textContent('#lPos')) === '1');
-  check('題目沒變', (await page.textContent('#prompt')).trim() === prompt1);
-  const missOn = await page.locator('.key.miss').count();
-  check('錯鍵出現紅燈', missOn >= 1, 'miss=' + missOn);
+  check('提示鍵與題目一致', hintSym === (await page.textContent('#prompt')).trim());
 
-  log('\n[8] 學習模式：按對 → 跳下一題');
-  await page.waitForTimeout(600); // 等紅燈消失
-  const rightCode = await page.evaluate((sym) => {
-    const D = window.TP_DATA;
-    return Object.keys(D.BOPOMOFO).find(k => D.BOPOMOFO[k] === sym);
-  }, prompt1);
-  await page.keyboard.press(rightCode);
-  await page.waitForTimeout(150);
-  check('答對計數 = 1', (await page.textContent('#lRight')) === '1', 'right=' + (await page.textContent('#lRight')));
-  check('題號前进到 2', (await page.textContent('#lPos')) === '2', 'pos=' + (await page.textContent('#lPos')));
-  const prompt2 = (await page.textContent('#prompt')).trim();
-  check('換了新的題目', prompt2 !== prompt1, `${prompt1} -> ${prompt2}`);
-
-  log('\n[9] 學習模式：關閉黃色提示');
-  await page.click('#h-off');
-  await page.waitForTimeout(200);
-  check('提示關閉後不亮黃鍵', (await page.locator('.key.hint').count()) === 0);
-  await page.click('#h-on');
-  await page.waitForTimeout(200);
-  check('提示可再開啟', (await page.locator('.key.hint').count()) >= 1);
-
-  log('\n[10] 練習範圍切換');
-  await page.click('#g-tone');
-  await page.waitForTimeout(200);
-  check('聲調範圍 = 5 題', (await page.textContent('#lTotal')) === '5', 'total=' + (await page.textContent('#lTotal')));
-  await page.click('#g-shengmu');
-  await page.waitForTimeout(200);
-  check('聲母範圍 = 21 題', (await page.textContent('#lTotal')) === '21', 'total=' + (await page.textContent('#lTotal')));
-  await page.click('#g-all');
-  await page.waitForTimeout(200);
-
-  log('\n[11] 學習模式跑完整輪 → 結果面板');
-  for (let i = 0; i < 60; i++) {
-    const done = await page.evaluate(() => !document.getElementById('results').hidden);
-    if (done) break;
+  log('\n[9] 跑完整輪 → 結果頁');
+  for (let i = 0; i < 70; i++) {
+    if ((await page.evaluate(() => location.hash)) === '#/result') break;
     const sym = (await page.textContent('#prompt')).trim();
-    const code = await page.evaluate((s) => {
-      const D = window.TP_DATA;
-      return Object.keys(D.BOPOMOFO).find(k => D.BOPOMOFO[k] === s);
-    }, sym);
+    const code = await codeOfSym(page, sym);
     if (!code) break;
     await page.keyboard.press(code);
-    await page.waitForTimeout(40);
+    await page.waitForTimeout(30);
   }
-  check('跑完顯示結果', await page.evaluate(() => !document.getElementById('results').hidden));
-  const mainLab = await page.textContent('#rMainLab');
-  check('結果為答對率', mainLab === '答對率', 'lab=' + mainLab);
-  check('答對率 100%', (await page.textContent('#rMain')) === '100%', 'v=' + (await page.textContent('#rMain')));
+  check('跑完自動進結果頁', (await page.evaluate(() => location.hash)) === '#/result');
+  check('主指標為答對率', (await page.textContent('#rMainLab')) === '答對率');
+  check('答對率 100%', (await page.textContent('#rMain')) === '100%', await page.textContent('#rMain'));
+  check('答對 42 題', (await page.textContent('#rHits')) === '42', await page.textContent('#rHits'));
 
-  log('\n[12] 英文模式 + 計時選項');
-  await page.click('#m-normal');
-  await page.waitForTimeout(200);
-  await page.click('#l-en');
-  await page.waitForTimeout(200);
-  check('單位變 WPM', (await page.textContent('#unit')) === 'WPM', 'unit=' + (await page.textContent('#unit')));
-  const enText = await page.evaluate(() => Array.from(document.querySelectorAll('#view span')).map(s => s.dataset.ch).join(''));
-  check('英文文本為拉丁字元', /^[A-Za-z ,.;:'"-]+$/.test(enText), enText.slice(0, 40));
-  await page.click('#t-text');
-  await page.waitForTimeout(150);
-  check('計字模式隱藏秒數列', !(await page.locator('#row-duration').isVisible()));
-  await page.click('#t-time');
-  await page.waitForTimeout(150);
-  await page.click('#d-15');
-  await page.waitForTimeout(150);
-  check('可切 15 秒', (await page.textContent('#sTime')) === '15', 't=' + (await page.textContent('#sTime')));
-
-  log('\n[13] 英文打字 + 計時結束');
-  await page.click('#l-zh');
-  await page.waitForTimeout(150);
-  await page.click('#d-15');
-  const enChars = await page.evaluate(() => Array.from(document.querySelectorAll('#view span')).map(s => s.dataset.ch));
-  await page.click('#typer');
-  for (const ch of enChars.slice(0, 5)) {
-    await page.evaluate((c) => {
-      const cap = document.getElementById('cap');
-      cap.focus();
-      cap.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }));
-      cap.value = c;
-      cap.dispatchEvent(new CompositionEvent('compositionend', { data: c }));
-    }, ch);
-    await page.waitForTimeout(20);
-  }
-  check('英文/中文打字管線正常', (await page.locator('#view span.ok').count()) >= 5);
-
-  log('\n[14] 唐詩素材');
-  await page.click('#m-normal');
-  await page.waitForTimeout(150);
-  await page.click('#l-poem');
+  /* ---------- 10. 唐詩素材 ---------- */
+  log('\n[10] 唐詩素材（於結果頁→換設定）');
+  await page.click('#b-change');
   await page.waitForTimeout(250);
-  check('難度列出現', await page.locator('#row-tier').isVisible());
-  const credit = (await page.textContent('#view i.pc') || '').trim();
-  check('顯示出處（作者＋篇名）', /[（(〈《].+[）)〉》]/.test(credit) || credit.length > 2, 'credit=' + credit);
-  const poemChars = await page.evaluate(() => Array.from(document.querySelectorAll('#view span')).map(s => s.dataset.ch));
-  check('唐詩為全形漢字＋標點', poemChars.length >= 20 && poemChars.every(c => /[\u4e00-\u9fff，。；：！？、]/.test(c)), poemChars.slice(0, 12).join(''));
-  // 出處以 <i> 呈現，比對用的 span 必須正好是詩文本體，不含出處字元
+  // 上一輪是學習模式，先回首頁改選一般練習
+  await page.click('.back');
+  await page.waitForTimeout(250);
+  await page.click('#pick-normal');
+  await page.waitForTimeout(250);
+  await page.click('#l-poem');
+  await page.waitForTimeout(150);
+  await page.click('#k-e');
+  await page.waitForTimeout(120);
+  await page.click('#b-start');
+  await page.waitForTimeout(300);
+  const credit = ((await page.textContent('#view i.pc')) || '').trim();
+  check('顯示出處（作者＋篇名）', credit.includes('〈'), 'credit=' + credit);
   const poemCheck = await page.evaluate(() => {
     const typed = Array.from(document.querySelectorAll('#view span')).map(s => s.dataset.ch).join('');
     const all = [].concat(...Object.values(window.TP_POEMS));
-    return { typed, matched: all.some(x => x.p.join('') === typed), creditInPoem: typed.includes('〈') };
+    return { typed, matched: all.some(x => x.p.join('') === typed), inPoem: typed.includes('〈') };
   });
-  check('出處不參與比對（span 內容為純詩文且對得上原庫）',
-        poemCheck.matched && !poemCheck.creditInPoem,
-        'typed=' + poemCheck.typed.slice(0, 20) + ' matched=' + poemCheck.matched);
-  for (const ch of poemChars.slice(0, 6)) {
-    await page.evaluate((c) => {
-      const cap = document.getElementById('cap'); cap.focus();
-      cap.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }));
-      cap.value = c; cap.dispatchEvent(new CompositionEvent('compositionend', { data: c }));
-    }, ch);
-    await page.waitForTimeout(20);
-  }
-  check('唐詩打字比對正常', (await page.locator('#view span.ok').count()) === 6, 'ok=' + (await page.locator('#view span.ok').count()));
-  check('唐詩單位為字/分', (await page.textContent('#unit')) === '字/分');
-  await page.click('#k-h');
-  await page.waitForTimeout(250);
-  const hardChars = await page.evaluate(() => Array.from(document.querySelectorAll('#view span')).map(s => s.dataset.ch).join(''));
-  check('切換難度後換了題目', hardChars.length > 0);
-  await page.click('#k-e');
-  await page.waitForTimeout(200);
-  await page.click('#l-zh');
-  await page.waitForTimeout(200);
-  check('切回中文後難度列隱藏', !(await page.locator('#row-tier').isVisible()));
-  check('切回中文後無出處標籤', (await page.locator('#view i.pc').count()) === 0);
+  check('span 內容為純詩文且對得上原庫', poemCheck.matched && !poemCheck.inPoem);
+  await page.click('#typer');
+  await typeChars(page, (await targetChars(page)).slice(0, 6));
+  check('唐詩打字比對正常', (await page.locator('#view span.ok').count()) === 6);
+  check('單位為字/分', (await page.textContent('#unit')) === '字/分');
 
-  log('\n[15] 自訂文本');
-  await page.fill('#custom', '測試 123 abc');
-  await page.click('#b-custom');
+  log('  · 英文素材');
+  await page.keyboard.press('Escape');
   await page.waitForTimeout(250);
-  const customTxt = await page.evaluate(() => Array.from(document.querySelectorAll('#view span')).map(s => s.dataset.ch).join(''));
-  check('自訂文本已載入', customTxt === '測試 123 abc', JSON.stringify(customTxt));
-  check('自訂文本走計字', !(await page.locator('#row-duration').isVisible()));
+  await page.click('#l-en');
+  await page.waitForTimeout(150);
+  await page.click('#b-start');
+  await page.waitForTimeout(300);
+  check('英文單位 WPM', (await page.textContent('#unit')) === 'WPM');
+  const enText = (await targetChars(page)).join('');
+  check('英文文本為拉丁字元', /^[A-Za-z ,.;:'"-]+$/.test(enText), enText.slice(0, 30));
 
-  log('\n[16] 主題切換 + 持久化');
+  /* ---------- 11. 持久化 ---------- */
+  log('\n[11] 設定與主題持久化');
+  await page.evaluate(() => location.hash = '#/');
+  await page.waitForTimeout(250);
   await page.click('#theme');
   await page.waitForTimeout(150);
   check('切到淺色', (await page.evaluate(() => document.documentElement.dataset.theme)) === 'light');
   await page.reload();
-  await page.waitForTimeout(400);
-  check('重新載入後記住主題', (await page.evaluate(() => document.documentElement.dataset.theme)) === 'light');
-  await page.click('#theme');
-  await page.waitForTimeout(100);
-
-  log('\n[17] Esc 重來');
-  await page.click('#m-learn');
+  await page.waitForTimeout(500);
+  check('重載後記住主題', (await page.evaluate(() => document.documentElement.dataset.theme)) === 'light');
+  check('重載後回到首頁', await visible(page, '#page-home'));
+  await page.click('#pick-normal');
   await page.waitForTimeout(250);
-  const sym = (await page.textContent('#prompt')).trim();
-  const code = await page.evaluate((s) => {
-    const D = window.TP_DATA;
-    return Object.keys(D.BOPOMOFO).find(k => D.BOPOMOFO[k] === s);
-  }, sym);
-  await page.keyboard.press(code);
+  check('重載後記住英文素材', (await page.getAttribute('#l-en', 'aria-pressed')) === 'true');
+  await page.click('#theme');
   await page.waitForTimeout(120);
-  check('答對後題號 = 2', (await page.textContent('#lPos')) === '2');
-  await page.keyboard.press('Escape');
-  await page.waitForTimeout(200);
-  check('Esc 重置回第 1 題', (await page.textContent('#lPos')) === '1');
-  check('Esc 重置答對數', (await page.textContent('#lRight')) === '0');
 
-  log('\n[18] 響應式（手機寬度）');
+  /* ---------- 12. 深連結 ---------- */
+  log('\n[12] 直接開 #/setup');
+  await page.goto(URL + '#/setup');
+  await page.waitForTimeout(400);
+  check('深連結停在設定頁', await visible(page, '#page-setup'));
+  await page.goto(URL + '#/nope');
+  await page.waitForTimeout(400);
+  check('未知路由退回首頁', await visible(page, '#page-home'));
+
+  /* ---------- 13. 響應式 + 截圖 ---------- */
+  log('\n[13] 響應式與截圖');
+  await page.goto(URL);
+  await page.waitForTimeout(350);
+  await page.screenshot({ path: '/tmp/w-home.png', fullPage: true });
+  await page.click('#pick-normal');
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: '/tmp/w-setup-normal.png', fullPage: true });
+  await page.click('#b-start');
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: '/tmp/w-practice.png', fullPage: true });
+  await page.evaluate(() => location.hash = '#/');
+  await page.waitForTimeout(250);
+  await page.click('#pick-learn');
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: '/tmp/w-setup-learn.png', fullPage: true });
+  await page.click('#b-start');
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: '/tmp/w-practice-learn.png', fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(300);
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 2);
-  check('無橫向溢出', !overflow, 'scrollWidth=' + await page.evaluate(() => document.documentElement.scrollWidth));
-  await page.screenshot({ path: '/tmp/shot-mobile-learn.png', fullPage: true });
-  await page.click('#m-normal');
+  let overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 2);
+  check('手機：學習練習頁無橫向溢出', !overflow, 'sw=' + await page.evaluate(() => document.documentElement.scrollWidth));
+  await page.screenshot({ path: '/tmp/w-m-learn.png', fullPage: true });
+  await page.goto(URL);
+  await page.waitForTimeout(350);
+  overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 2);
+  check('手機：首頁無橫向溢出', !overflow);
+  await page.screenshot({ path: '/tmp/w-m-home.png', fullPage: true });
+  await page.click('#pick-normal');
   await page.waitForTimeout(250);
-  await page.screenshot({ path: '/tmp/shot-mobile-normal.png', fullPage: true });
-  await page.setViewportSize({ width: 1200, height: 1000 });
-  await page.waitForTimeout(250);
-  await page.click('#m-learn');
-  await page.waitForTimeout(300);
-  await page.screenshot({ path: '/tmp/shot-desktop-learn.png', fullPage: true });
-  await page.click('#m-normal');
-  await page.waitForTimeout(250);
-  await page.screenshot({ path: '/tmp/shot-desktop-normal.png', fullPage: true });
+  overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 2);
+  check('手機：設定頁無橫向溢出', !overflow);
+  await page.screenshot({ path: '/tmp/w-m-setup.png', fullPage: true });
 
-  log('\n[19] 控制台錯誤');
+  log('\n[14] 控制台錯誤');
   check('無 JS 錯誤', errs.length === 0, errs.join(' | '));
 
   log('\n=========================');
