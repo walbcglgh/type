@@ -30,10 +30,20 @@
     </div>
 
     <div class="row-label" id="row-lang">
-      <span>語言</span>
+      <span>素材</span>
       <div class="seg">
         <button id="l-zh" type="button" aria-pressed="true">中文</button>
+        <button id="l-poem" type="button" aria-pressed="false">唐詩</button>
         <button id="l-en" type="button" aria-pressed="false">英文</button>
+      </div>
+    </div>
+
+    <div class="row-label" id="row-tier" hidden>
+      <span>唐詩難度</span>
+      <div class="seg">
+        <button id="k-e" type="button" aria-pressed="true">易・常用字</button>
+        <button id="k-m" type="button" aria-pressed="false">中</button>
+        <button id="k-h" type="button" aria-pressed="false">難</button>
       </div>
     </div>
 
@@ -171,6 +181,7 @@
 </div>
 
 <script src="js/data.js"></script>
+<script src="js/poems.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

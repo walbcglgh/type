@@ -10,7 +10,8 @@
 
   var S = {
     mode: "normal",
-    lang: "zh",
+    src: "zh",
+    tier: "e",
     timing: "time",
     duration: 60,
     strict: false,
@@ -55,22 +56,33 @@
   }
 
   function pickSentence() {
-    var pool = S.lang === "zh" ? D.ZH_SENTENCES : D.SENTENCES;
+    if (S.src === "poem") {
+      const list = window.TP_POEMS[S.tier] || window.TP_POEMS.e;
+      let x = list[Math.floor(Math.random() * list.length)];
+      if (list.length > 1 && x === S.lastPoem) x = list[(list.indexOf(x) + 1) % list.length];
+      S.lastPoem = x;
+      S.credit = (x.a ? x.a + "〈" + x.t + "〉" : x.t) + "　";
+      return x.p.join("");
+    }
+    var pool = S.src === "en" ? D.SENTENCES : D.ZH_SENTENCES;
     var s = pool[Math.floor(Math.random() * pool.length)];
     if (pool.length > 1 && s === S.lastSentence) s = pool[(pool.indexOf(s) + 1) % pool.length];
     S.lastSentence = s;
+    S.credit = "";
     return s;
   }
+
+  function isHan() { return S.src !== "en"; }
 
   function show(node, on) { node.hidden = !on; }
   function fmt(n) { return (Math.round(n * 10) / 10).toFixed(1); }
 
   function speedOf() {
     var mins = Math.max(S.elapsed / 60, 1 / 60);
-    return S.lang === "zh" ? S.hits / mins : S.hits / 5 / mins;
+    return isHan() ? S.hits / mins : S.hits / 5 / mins;
   }
 
-  function speedLabel() { return S.lang === "zh" ? "字/分" : "WPM"; }
+  function speedLabel() { return isHan() ? "字/分" : "WPM"; }
 
   /* ---------- 虛擬鍵盤 ---------- */
   function buildKeyboard() {
@@ -123,10 +135,16 @@
   /* ---------- 文本渲染 ---------- */
   function resetView() {
     el.view.innerHTML = "";
-    S.cells = []; S.target = ""; S.idx = 0;
+    S.cells = []; S.target = ""; S.idx = 0; S.credit = "";
   }
 
   function appendText(str) {
+    if (S.credit) {
+      var tag = document.createElement("i");
+      tag.className = "pc";
+      tag.textContent = S.credit;
+      el.view.appendChild(tag);
+    }
     S.target += str;
     for (var i = 0; i < str.length; i++) {
       var ch = str[i];
@@ -162,7 +180,10 @@
     if (!S.running || S.blocked || S.finished) return;
     for (var i = 0; i < str.length; i++) {
       if (S.idx >= S.target.length) {
-        if (S.timing === "time") { appendText(" " + pickSentence()); }
+        if (S.timing === "time") {
+          var more = pickSentence();
+          appendText((isHan() ? "" : " ") + more);
+        }
         else { finish(); return; }
       }
       var got = str[i], want = S.target[S.idx];
@@ -252,10 +273,11 @@
     clearKeys();
 
     resetView();
-    appendText(text || pickSentence());
+    if (text) { S.credit = ""; appendText(text); }
+    else appendText(pickSentence());
 
     el.unit.textContent = speedLabel();
-    el.ghost.innerHTML = S.lang === "zh"
+    el.ghost.innerHTML = isHan()
       ? "切到注音／倉頡輸入法，<b>直接開始打字</b>就會計時"
       : "切到 <b>English</b> 輸入法，直接開始打字就會計時";
     show(el.ghost, true);
@@ -283,7 +305,7 @@
   }
 
   function verdict(sp, acc) {
-    var base = S.lang === "zh" ? 40 : 45;
+    var base = isHan() ? 40 : 45;
     if (acc >= 98 && sp >= base) return "很穩，速度和正確率都到位了。";
     if (acc >= 95) return "正確率不錯，可以再稍微加速。";
     if (acc >= 85) return "速度可以，但錯誤偏多；慢一點、打準確會進步更快。";
@@ -421,6 +443,7 @@
   function setModeRow() {
     var learn = S.mode === "learn";
     show($("row-lang"), !learn);
+    show($("row-tier"), !learn && S.src === "poem");
     show($("row-timing"), !learn);
     show($("row-duration"), !learn && S.timing === "time");
     show($("row-strict"), !learn);
@@ -462,8 +485,15 @@
 
     seg([
       { btn: $("l-zh"), val: "zh" },
+      { btn: $("l-poem"), val: "poem" },
       { btn: $("l-en"), val: "en" }
-    ], function (v) { S.lang = v; if (S.mode === "normal") startNormal(); });
+    ], function (v) { S.src = v; setModeRow(); if (S.mode === "normal") startNormal(); });
+
+    seg([
+      { btn: $("k-e"), val: "e" },
+      { btn: $("k-m"), val: "m" },
+      { btn: $("k-h"), val: "h" }
+    ], function (v) { S.tier = v; if (S.mode === "normal") startNormal(); });
 
     seg([
       { btn: $("t-time"), val: "time" },
@@ -502,7 +532,7 @@
     $("b-custom").addEventListener("click", function () {
       var v = (el.custom.value || "").replace(/\r/g, "").trim();
       if (!v) { el.custom.focus(); return; }
-      S.lang = /[\u3400-\u9FFF]/.test(v) ? "zh" : "en";
+      S.src = /[\u3400-\u9FFF]/.test(v) ? "zh" : "en";
       S.timing = "text";
       setModeRow();
       startNormal(v);

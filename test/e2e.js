@@ -219,7 +219,47 @@ function check(name, cond, extra) {
   }
   check('英文/中文打字管線正常', (await page.locator('#view span.ok').count()) >= 5);
 
-  log('\n[14] 自訂文本');
+  log('\n[14] 唐詩素材');
+  await page.click('#m-normal');
+  await page.waitForTimeout(150);
+  await page.click('#l-poem');
+  await page.waitForTimeout(250);
+  check('難度列出現', await page.locator('#row-tier').isVisible());
+  const credit = (await page.textContent('#view i.pc') || '').trim();
+  check('顯示出處（作者＋篇名）', /[（(〈《].+[）)〉》]/.test(credit) || credit.length > 2, 'credit=' + credit);
+  const poemChars = await page.evaluate(() => Array.from(document.querySelectorAll('#view span')).map(s => s.dataset.ch));
+  check('唐詩為全形漢字＋標點', poemChars.length >= 20 && poemChars.every(c => /[\u4e00-\u9fff，。；：！？、]/.test(c)), poemChars.slice(0, 12).join(''));
+  // 出處以 <i> 呈現，比對用的 span 必須正好是詩文本體，不含出處字元
+  const poemCheck = await page.evaluate(() => {
+    const typed = Array.from(document.querySelectorAll('#view span')).map(s => s.dataset.ch).join('');
+    const all = [].concat(...Object.values(window.TP_POEMS));
+    return { typed, matched: all.some(x => x.p.join('') === typed), creditInPoem: typed.includes('〈') };
+  });
+  check('出處不參與比對（span 內容為純詩文且對得上原庫）',
+        poemCheck.matched && !poemCheck.creditInPoem,
+        'typed=' + poemCheck.typed.slice(0, 20) + ' matched=' + poemCheck.matched);
+  for (const ch of poemChars.slice(0, 6)) {
+    await page.evaluate((c) => {
+      const cap = document.getElementById('cap'); cap.focus();
+      cap.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }));
+      cap.value = c; cap.dispatchEvent(new CompositionEvent('compositionend', { data: c }));
+    }, ch);
+    await page.waitForTimeout(20);
+  }
+  check('唐詩打字比對正常', (await page.locator('#view span.ok').count()) === 6, 'ok=' + (await page.locator('#view span.ok').count()));
+  check('唐詩單位為字/分', (await page.textContent('#unit')) === '字/分');
+  await page.click('#k-h');
+  await page.waitForTimeout(250);
+  const hardChars = await page.evaluate(() => Array.from(document.querySelectorAll('#view span')).map(s => s.dataset.ch).join(''));
+  check('切換難度後換了題目', hardChars.length > 0);
+  await page.click('#k-e');
+  await page.waitForTimeout(200);
+  await page.click('#l-zh');
+  await page.waitForTimeout(200);
+  check('切回中文後難度列隱藏', !(await page.locator('#row-tier').isVisible()));
+  check('切回中文後無出處標籤', (await page.locator('#view i.pc').count()) === 0);
+
+  log('\n[15] 自訂文本');
   await page.fill('#custom', '測試 123 abc');
   await page.click('#b-custom');
   await page.waitForTimeout(250);
@@ -227,7 +267,7 @@ function check(name, cond, extra) {
   check('自訂文本已載入', customTxt === '測試 123 abc', JSON.stringify(customTxt));
   check('自訂文本走計字', !(await page.locator('#row-duration').isVisible()));
 
-  log('\n[15] 主題切換 + 持久化');
+  log('\n[16] 主題切換 + 持久化');
   await page.click('#theme');
   await page.waitForTimeout(150);
   check('切到淺色', (await page.evaluate(() => document.documentElement.dataset.theme)) === 'light');
@@ -237,7 +277,7 @@ function check(name, cond, extra) {
   await page.click('#theme');
   await page.waitForTimeout(100);
 
-  log('\n[16] Esc 重來');
+  log('\n[17] Esc 重來');
   await page.click('#m-learn');
   await page.waitForTimeout(250);
   const sym = (await page.textContent('#prompt')).trim();
@@ -253,7 +293,7 @@ function check(name, cond, extra) {
   check('Esc 重置回第 1 題', (await page.textContent('#lPos')) === '1');
   check('Esc 重置答對數', (await page.textContent('#lRight')) === '0');
 
-  log('\n[17] 響應式（手機寬度）');
+  log('\n[18] 響應式（手機寬度）');
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(300);
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 2);
@@ -271,7 +311,7 @@ function check(name, cond, extra) {
   await page.waitForTimeout(250);
   await page.screenshot({ path: '/tmp/shot-desktop-normal.png', fullPage: true });
 
-  log('\n[18] 控制台錯誤');
+  log('\n[19] 控制台錯誤');
   check('無 JS 錯誤', errs.length === 0, errs.join(' | '));
 
   log('\n=========================');
