@@ -188,6 +188,7 @@
   function resetView() {
     el.view.innerHTML = "";
     S.cells = []; S.target = ""; S.idx = 0; S.credit = "";
+    if (el.comp && el.comp.parentNode) el.comp.parentNode.removeChild(el.comp);
   }
 
   function appendText(str) {
@@ -217,6 +218,12 @@
     if (!c) return;
     var want = c.node.offsetTop - el.view.clientHeight * 0.35;
     if (Math.abs(el.view.scrollTop - want) > 2) el.view.scrollTop = Math.max(0, want);
+    // 讓隱藏 input 跟著游標走，輸入法的選字窗才會出現在你正在打的地方
+    if (S.mode === "normal") {
+      var r = c.node.getBoundingClientRect(), pr = el.typer.getBoundingClientRect();
+      el.cap.style.left = Math.max(0, r.left - pr.left) + "px";
+      el.cap.style.top = Math.max(0, r.top - pr.top) + "px";
+    }
   }
 
   function paintCell(i, state) {
@@ -227,6 +234,17 @@
     c.node.classList.toggle("bad", state === "bad");
   }
 
+  /* ---------------- 輸入法組字緩衝顯示 ---------------- */
+  // 把「還在拼的注音」顯示在游標處，否則使用者根本不知道自己按了什麼、拼到哪裡
+  function showComposing(str) {
+    var node = el.comp;
+    if (!node) return;
+    if (!str) { if (node.parentNode) node.parentNode.removeChild(node); return; }
+    var cur = S.cells[S.idx] && S.cells[S.idx].node;
+    if (cur) el.view.insertBefore(node, cur);
+    else el.view.appendChild(node);
+    if (node.textContent !== str) node.textContent = str;
+  }
   /* ---------------- 輸入處理 ---------------- */
   function commit(str) {
     if (!S.running || S.blocked || S.finished) return;
@@ -439,6 +457,11 @@
   function route() {
     var h = (location.hash || "#/").replace(/^#\/?/, "").split("?")[0];
     if (!PAGES[h]) h = "home";
+    // 重新整理進到結果頁時沒有這一輪資料，退回設定頁並修正網址
+    if (h === "result" && !S.finished) {
+      h = "setup";
+      try { history.replaceState(null, "", "#/setup"); } catch (e) { location.hash = "#/setup"; }
+    }
     // 離開練習頁時停止這輪
     if (S.route === "practice" && h !== "practice") { stopClock(); S.running = false; }
     S.route = h;
@@ -485,6 +508,12 @@
   }
 
   /* ---------------- 按鍵分發 ---------------- */
+  // 只有「輸入法正在處理」的事件才需要避開；一般按鍵絕對不能 preventDefault，
+  // 否則注音的第一個鍵（常常不是 229）會被吃掉，選字、空格換字全都無法用。
+  function isIME(e) { return e.keyCode === 229 || e.key === "Process" || e.isComposing; }
+
+  var IGNORED = /^(Shift|Control|Alt|Meta|CapsLock|Tab|F\d|Arrow|Home|End|PageUp|PageDown|Insert|Delete)/;
+
   function onKeyDown(e) {
     if (S.route !== "practice") {
       if (e.key === "Enter" && S.route === "home" &&
@@ -494,24 +523,22 @@
       return;
     }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
-    if (e.code === "Escape") { e.preventDefault(); go("setup"); return; }
-    if (/^(Shift|Control|Alt|Meta|CapsLock|Tab|F\d|Arrow|Home|End|PageUp|PageDown|Insert|Delete)/.test(e.code)) return;
 
     if (S.mode === "learn") {
+      if (e.code === "Escape") { e.preventDefault(); go("setup"); return; }
+      if (IGNORED.test(e.code)) return;
       e.preventDefault();
-      if (!e.repeat) onKey(e.code);
+      if (!e.repeat) onKey(e.code);            // 用 code，作業系統輸入法狀態不影響判定
       return;
     }
-    if (S.composing || e.keyCode === 229 || e.key === "Process") return; // 交給輸入法
+
+    // 一般練習：文字一律從 input / composition 事件取，keydown 只負責後備鍵
+    if (isIME(e)) return;
+    if (e.code === "Escape") { e.preventDefault(); go("setup"); return; }
+    if (IGNORED.test(e.code)) return;
     if (e.code === "Backspace") {
       e.preventDefault();
       if (S.started) backspace();
-      return;
-    }
-    if (e.key && e.key.length === 1) {
-      e.preventDefault();
-      beginRun();
-      commit(e.key);
     }
   }
 
@@ -549,6 +576,8 @@
     ].forEach(function (id) { el[id] = $(id); });
     el.paneNormal = $("pane-normal");
     el.paneLearn = $("pane-learn");
+    el.comp = document.createElement("i");
+    el.comp.className = "comp";
 
     var t = "dark";
     try { t = localStorage.getItem("tp-theme") || "dark"; } catch (e) {}
@@ -622,13 +651,31 @@
     $("b-again").addEventListener("click", function () { go("practice"); });
     $("b-change").addEventListener("click", function () { go("setup"); });
 
-    // 練習區互動
+    // 練習區互動：文字一律從 input / composition 事件取，
+    // 這樣輸入法的選字、空格換字、Enter 確認都交給系統處理。
     el.typer.addEventListener("mousedown", function (e) { e.preventDefault(); focusCap(); });
     el.cap.addEventListener("compositionstart", function () { S.composing = true; beginRun(); });
+    el.cap.addEventListener("compositionupdate", function (e) { showComposing(e.data || el.cap.value || ""); });
     el.cap.addEventListener("compositionend", function (e) {
       S.composing = false;
+      var data = e.data || "";
       el.cap.value = "";
-      if (e.data) commit(e.data);
+      showComposing("");
+      if (data) commit(data);
+    });
+    el.cap.addEventListener("input", function (e) {
+      if (S.composing) return;                 // 組合中的拼音不計
+      // compositionend 已處理過的組字結果不再重複入帳
+      if (e && /CompositionText$/.test(e.inputType || "")) return;
+      var v = el.cap.value;
+      el.cap.value = "";
+      if (!v) return;
+      beginRun();
+      commit(v);
+    });
+    el.cap.addEventListener("paste", function (e) { e.preventDefault(); });
+    el.cap.addEventListener("blur", function () {
+      if (S.route === "practice" && S.mode === "normal") focusCap();
     });
 
     document.addEventListener("keydown", onKeyDown);

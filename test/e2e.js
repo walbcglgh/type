@@ -317,17 +317,104 @@ async function hidden(page, sel) { return !(await page.locator(sel).isVisible())
   const enText = (await targetChars(page)).join('');
   check('英文文本為拉丁字元', /^[A-Za-z ,.;:'"-]+$/.test(enText), enText.slice(0, 30));
 
-  /* ---------- 11. 持久化 ---------- */
-  log('\n[11] 設定與主題持久化');
+  /* ---------- 11. 真實按鍵路徑（不靠合成事件） ---------- */
+  log('\n[11] 真實按鍵：英文直接打、注音不被 keydown 吃掉');
+  await page.goto(URL);
+  await page.waitForTimeout(350);
+  await page.click('#pick-normal');
+  await page.waitForTimeout(250);
+  await page.click('#l-en');
+  await page.waitForTimeout(150);
+  await page.click('#b-start');
+  await page.waitForTimeout(300);
+  const enTarget = (await targetChars(page)).slice(0, 10);
+  await page.click('#typer');
+  await page.keyboard.type(enTarget.join(''), { delay: 15 });
+  await page.waitForTimeout(150);
+  check('真實鍵盤輸入能被打入（未 preventDefault）',
+        (await page.locator('#view span.ok').count()) === enTarget.length,
+        'ok=' + (await page.locator('#view span.ok').count()) + ' want=' + enTarget.length);
+  check('輸入後 cap 不殘留字元', (await page.inputValue('#cap')) === '');
+
+  // 注音輸入法：按鍵必須能穿透到輸入法（keydown 不得 preventDefault），
+  // 且組合中的拼音不計分，只有 compositionend 的成品才算。
+  await page.evaluate(() => location.hash = '#/setup');
+  await page.waitForTimeout(250);
+  await page.click('#l-zh');
+  await page.click('#t-text');
+  await page.waitForTimeout(150);
+  await page.click('#b-start');
+  await page.waitForTimeout(300);
+  const zhTarget = (await targetChars(page)).slice(0, 4);
+  await page.click('#typer');
+  await page.evaluate((want) => {
+    const cap = document.getElementById('cap');
+    cap.focus();
+    // 模擬注音：逐鍵按（首鍵常非 229），期間 input 帶拼音、compositionend 出字
+    want.forEach((ch) => {
+      cap.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', code: 'KeyA', bubbles: true, cancelable: true }));
+      cap.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }));
+      cap.value = 'a';
+      cap.dispatchEvent(new InputEvent('input', { inputType: 'insertCompositionText', data: 'a', bubbles: true }));
+      cap.value = ch;
+      cap.dispatchEvent(new CompositionEvent('compositionend', { data: ch, bubbles: true }));
+      cap.dispatchEvent(new InputEvent('input', { inputType: 'insertCompositionText', data: ch, bubbles: true }));
+    });
+  }, zhTarget);
+  await page.waitForTimeout(150);
+  check('注音組合中拼音不計分，僅成品入帳',
+        (await page.locator('#view span.ok').count()) === zhTarget.length,
+        'ok=' + (await page.locator('#view span.ok').count()));
+  check('composition 後 cap 清空', (await page.evaluate(() => document.getElementById('cap').value)) === '');
+  check('組字結束後不殘留緩衝顯示', (await page.locator('#view i.comp').count()) === 0);
+
+  // 組字過程中，還在拼的注音必須看得見（否則使用者不知道自己拼了什麼）
+  await page.evaluate(() => {
+    const cap = document.getElementById('cap');
+    cap.focus();
+    cap.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }));
+    cap.value = 'ㄅ';
+    cap.dispatchEvent(new InputEvent('input', { inputType: 'insertCompositionText', data: 'ㄅ', bubbles: true }));
+    cap.dispatchEvent(new CompositionEvent('compositionupdate', { data: 'ㄅ', bubbles: true }));
+  });
+  await page.waitForTimeout(120);
+  const compTxt = (await page.textContent('#view i.comp')) || '';
+  check('組字中的注音顯示在游標處', compTxt === 'ㄅ', 'comp=' + JSON.stringify(compTxt));
+  check('緩衝不混進比對格', (await page.locator('#view span.bad').count()) === 0);
+  await page.evaluate(() => {
+    const cap = document.getElementById('cap');
+    cap.value = '八';
+    cap.dispatchEvent(new CompositionEvent('compositionend', { data: '八', bubbles: true }));
+  });
+  await page.waitForTimeout(120);
+  check('確認後緩衝消失', (await page.locator('#view i.comp').count()) === 0);
+
+  // Enter 不該被當成一個字元判錯（注音選字常用 Enter 確認）
+  const errBeforeEnter = await page.textContent('#sErr');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(150);
+  check('按 Enter 不會被判錯字', (await page.textContent('#sErr')) === errBeforeEnter,
+        'err=' + (await page.textContent('#sErr')));
+
+  /* ---------- 12. 設定與主題持久化 ---------- */
+  log('\n[12] 設定與主題持久化');
   await page.evaluate(() => location.hash = '#/');
   await page.waitForTimeout(250);
+  await page.goto(URL);
+  await page.waitForTimeout(300);
+  await page.click('#pick-normal');
+  await page.waitForTimeout(200);
+  await page.click('#l-en');
+  await page.waitForTimeout(150);
   await page.click('#theme');
   await page.waitForTimeout(150);
   check('切到淺色', (await page.evaluate(() => document.documentElement.dataset.theme)) === 'light');
   await page.reload();
   await page.waitForTimeout(500);
   check('重載後記住主題', (await page.evaluate(() => document.documentElement.dataset.theme)) === 'light');
-  check('重載後回到首頁', await visible(page, '#page-home'));
+  await page.evaluate(() => location.hash = '#/');
+  await page.waitForTimeout(250);
+  check('/hash 清空後回到首頁', await visible(page, '#page-home'));
   await page.click('#pick-normal');
   await page.waitForTimeout(250);
   check('重載後記住英文素材', (await page.getAttribute('#l-en', 'aria-pressed')) === 'true');
